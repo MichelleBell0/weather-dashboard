@@ -3,6 +3,7 @@ const metricUnits = 'metric';
 const searchFormEl = document.querySelector('#search-form');
 const searchHistoryEl = document.querySelector('#search-history');
 const currentWeatherEl = document.querySelector('#current-weather');
+const forecastWeatherEl = document.querySelector('#forecast-weather');
 
 const conditions = {
     'Clear' : '&#9728;&#65039;',
@@ -23,16 +24,88 @@ const conditions = {
     'Tornado' : '&#127744;&#65039;'
 };
 
-function getHistoryFromStorage() {
-    return JSON.parse(localStorage.getItem("history")) || [];
+// Get and update search history from local storage
+function getHistoryFromStorage(searchInput) {
+    const history = JSON.parse(localStorage.getItem("history")) || {};
+    const cityName = searchInput;
+
+    history[cityName] = `./index.html?q=${cityName}`;
+
+    const updatedHistory = JSON.stringify(history);
+
+    localStorage.setItem('history', updatedHistory);
+
+    renderSearchHistory();
 }
 
+// Get search history from local storage and create a button search button for each value with the corresponding link
+function renderSearchHistory() {
+    const historyObj = JSON.parse(localStorage.getItem("history"));
+    for (let city in historyObj) {
+        console.log(city);
+        const searchColumnEl = document.createElement('div');
+        searchColumnEl.classList.add('col-12', 'w-100');
+
+        searchColumnEl.innerHTML += `<button onclick="window.location.href = '${historyObj[city]}';" class="btn btn-secondary bg-gradient shadow w-100 mt-3">${city}</button>`;
+
+        searchHistoryEl.append(searchColumnEl);
+    }
+}
+
+// Get parameters from local window address and split it to get the query
 function getParam() {
     const query = document.location.search.split('=').pop();
 
     searchAPI(query);
 }
 
+// Convert a UNIX timestamp to a 'M/D/YYYY' format using dayjs
+function convertDate(unixTimestamp) {
+    const UnixDate = dayjs.unix(unixTimestamp);
+    const formatDate = UnixDate.format('M/D/YYYY');
+    return formatDate;
+}
+
+// Print the 5-day forecast information to the browser
+function printForecast(forecastObj) {
+    const list = forecastObj.list;
+    let day = '';
+    let count = 0;
+
+    for (let item of list) {
+        if (convertDate(item['dt']) !== convertDate(day) && count < 5) {
+            day = item['dt'];
+            count += 1;
+
+            const forecastWeather = {
+                date: item['dt'],
+                cond: item['weather'][0]['main'],
+                temp: item['main']['temp'],
+                wind: item['wind']['speed'],
+                humidity: item['main']['humidity']
+            }
+    
+            const forecastCard = document.createElement('div');
+            forecastCard.classList.add('col', 'text-white', 'm-3', 'bg-dark', 'shadow');
+    
+            forecastCard.innerHTML += `<h4 class="my-3">${convertDate(forecastWeather.date)}</h4>`;
+    
+            for (let key in conditions) {
+                if (key === forecastWeather.cond) {
+                    forecastCard.innerHTML += `<p>${conditions[key]}</p>`;
+                }
+            }
+    
+            forecastCard.innerHTML += `<p>Temp: ${forecastWeather.temp}&#176;C</p>`;
+            forecastCard.innerHTML += `<p>Wind: ${forecastWeather.wind} MPH</p>`;
+            forecastCard.innerHTML += `<p>Humidity: ${forecastWeather.humidity}%</p>`;
+    
+            forecastWeatherEl.append(forecastCard);
+        }
+    }
+}
+
+// Print the current weather information to the browser
 function printCurrentWeather(weatherObj) {
     console.log(weatherObj);
 
@@ -45,12 +118,9 @@ function printCurrentWeather(weatherObj) {
         humidity: weatherObj.main.humidity
     };
 
-    const UnixDate = dayjs.unix(currentWeather.date);
-    const formatDate = UnixDate.format('M/D/YYYY');
-
     const currentTitleEl = document.createElement('h2');
     currentTitleEl.classList.add('mt-3');
-    currentTitleEl.textContent = `${currentWeather.city} (${formatDate}) `;
+    currentTitleEl.textContent = `${currentWeather.city} (${convertDate(currentWeather.date)}) `;
 
     for (let key in conditions) {
         if (key === currentWeather.conditions) {
@@ -64,8 +134,12 @@ function printCurrentWeather(weatherObj) {
     currentWeatherEl.innerHTML += `<p>Humidity: ${currentWeather.humidity}%</p>`;
 }
 
+// Search the API by fetching data from the URL
+// Use a nested fetch: first end gets info by city and second end uses the 'lat' and 'lon' from the first set of data to fetch the forecast data
 function searchAPI(query) {
     let weatherQueryUrl = `https://api.openweathermap.org/data/2.5/weather?q=${query}&units=${metricUnits}&appid=${APIKey}`;
+    let lon = '';
+    let lat = '';
 
     fetch(weatherQueryUrl)
         .then(function (response) {
@@ -82,6 +156,26 @@ function searchAPI(query) {
                 searchHistoryEl.innerHTML = '<h3>No results found, search again!</h3>';
             } else {
                 printCurrentWeather(weatherResults);
+                lon += weatherResults.coord.lon;
+                lat += weatherResults.coord.lat;
+            }
+
+            return fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&units=${metricUnits}&appid=${APIKey}`);
+        })
+        .then(function (response) {
+            if (!response.ok) {
+                throw response.json();
+            }
+            return response.json();
+        })
+        .then(function (forecastResults) {
+            console.log(forecastResults);
+
+            if (!forecastResults) {
+                console.log('No results found!');
+                searchHistoryEl.innerHTML = '<h3>No results found, search again!</h3>';
+            } else {
+                printForecast(forecastResults);
             }
         })
         .catch(function (error) {
@@ -89,6 +183,7 @@ function searchAPI(query) {
         });
 }
 
+// Handle submitted input from search for city form
 function handleSearchFormSubmit(event) {
     event.preventDefault();
 
@@ -100,7 +195,9 @@ function handleSearchFormSubmit(event) {
     }
 
     const queryString = `./index.html?q=${searchInputValue}`;
-  
+    
+    getHistoryFromStorage(searchInputValue);
+
     location.assign(queryString);
 
     getParam();
@@ -109,3 +206,5 @@ function handleSearchFormSubmit(event) {
 searchFormEl.addEventListener('submit', handleSearchFormSubmit);
 
 getParam();
+
+renderSearchHistory();
